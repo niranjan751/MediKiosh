@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "D:\\MediKiosk\\ai-service\\venv\\Lib\\site-packages",
+        "D:\\MediKiosk\\ai-service"
+    ]
+}
