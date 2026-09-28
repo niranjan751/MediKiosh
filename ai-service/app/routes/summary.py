@@ -1,32 +1,23 @@
 """
-MediKiosk AI Service
-Clinical Summary API Routes
-
-Purpose:
-    Provide REST API endpoints for generating and reviewing
-    AI-assisted clinical summaries.
-
-Important:
-    Clinical summaries are assistive only.
-    They are not diagnoses or autonomous medical decisions.
+MediKiosk AI Service - Clinical Summary API Routes
+==================================================
 """
 
-from typing import Any, Dict, Optional
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
+from app.models.schemas import (
+    ClinicalSummaryRequest,
+    ClinicalSummaryResponse,
+    DoctorReviewRequest,
+    DoctorReviewResponse,
+    ProcessingStatus,
+    ReviewStatus,
+)
 from app.services.summary_service import (
-    apply_doctor_review,
-    create_short_summary,
-    generate_clinical_summary,
-    get_summary_service_status,
+    apply_doctor_review_to_summary,
+    generate_structured_clinical_summary,
 )
 
-
-# ============================================================
-# ROUTER
-# ============================================================
 
 router = APIRouter(
     prefix="/summary",
@@ -34,209 +25,62 @@ router = APIRouter(
 )
 
 
-# ============================================================
-# REQUEST SCHEMAS
-# ============================================================
-
-class ClinicalSummaryRequest(BaseModel):
+@router.post("/generate", response_model=ClinicalSummaryResponse)
+def generate_clinical_summary_endpoint(request: ClinicalSummaryRequest):
     """
-    Request model for generating a clinical summary.
+    Generates a comprehensive, physician-ready AI clinical summary
+    incorporating patient interview (SOCRATES), OCR document findings,
+    abnormal lab results, and red-flag triage badges.
     """
-
-    patient: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Patient information",
-    )
-
-    interview_data: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Clinical interview information",
-    )
-
-    red_flag_data: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Red-flag detection results",
-    )
-
-    document_data: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="OCR/document information",
-    )
-
-
-class DoctorReviewRequest(BaseModel):
-    """
-    Request model for doctor review.
-    """
-
-    summary: Dict[str, Any] = Field(
-        ...,
-        description="AI-generated clinical summary",
-    )
-
-    doctor_notes: str = Field(
-        ...,
-        min_length=1,
-        description="Doctor's review notes",
-    )
-
-    doctor_name: Optional[str] = Field(
-        default=None,
-        description="Doctor name",
-    )
-
-
-# ============================================================
-# HEALTH
-# ============================================================
-
-@router.get("/health")
-def summary_health():
-    """
-    Check clinical summary service status.
-    """
-
-    return get_summary_service_status()
-
-
-# ============================================================
-# GENERATE SUMMARY
-# ============================================================
-
-@router.post("/generate")
-def generate_summary(
-    request: ClinicalSummaryRequest,
-):
-    """
-    Generate an AI-assisted clinical summary.
-    """
-
     try:
-
-        summary = generate_clinical_summary(
-            patient=request.patient,
+        summary = generate_structured_clinical_summary(
+            patient_id=request.patient_id,
+            session_id=request.session_id,
+            patient_info=request.patient_info,
             interview_data=request.interview_data,
-            red_flag_data=request.red_flag_data,
-            document_data=request.document_data,
+            documents_data=request.documents_data,
+            clinical_mode=request.clinical_mode,
+            ayush_data=request.ayush_data,
         )
 
-        return {
-            "success": True,
-            "message": (
-                "Clinical summary generated successfully."
-            ),
-            "data": summary,
-        }
+        return ClinicalSummaryResponse(
+            success=True,
+            patient_id=request.patient_id,
+            session_id=request.session_id,
+            status=ProcessingStatus.COMPLETED,
+            summary=summary,
+            review_status=ReviewStatus.PENDING,
+        )
 
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Clinical summary generation failed: {str(exc)}"
-            ),
+            detail=f"Failed to generate clinical summary: {str(exc)}",
         ) from exc
 
-
-# ============================================================
-# SHORT SUMMARY
-# ============================================================
-
-@router.post("/short")
-def generate_short_summary(
-    request: ClinicalSummaryRequest,
-):
-    """
-    Generate a short readable clinical summary.
-    """
-
-    try:
-
-        summary = generate_clinical_summary(
-            patient=request.patient,
-            interview_data=request.interview_data,
-            red_flag_data=request.red_flag_data,
-            document_data=request.document_data,
-        )
-
-        short_summary = create_short_summary(
-            summary
-        )
-
-        return {
-            "success": True,
-            "message": (
-                "Short clinical summary generated successfully."
-            ),
-            "summary": short_summary,
-            "data": summary,
-        }
-
-    except Exception as exc:
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Short summary generation failed: {str(exc)}"
-            ),
-        ) from exc
-
-
-# ============================================================
-# DOCTOR REVIEW
-# ============================================================
 
 @router.post("/review")
-def review_summary(
-    request: DoctorReviewRequest,
-):
+def review_summary_endpoint(request: DoctorReviewRequest):
     """
-    Apply doctor review to an AI-generated summary.
+    Enables attending doctor to edit, append clinical notes,
+    confirm diagnoses, and approve the clinical intake summary.
     """
-
     try:
-
-        reviewed_summary = apply_doctor_review(
-            summary=request.summary,
-            doctor_notes=request.doctor_notes,
+        updated = apply_doctor_review_to_summary(
+            summary=request.model_dump(),
+            doctor_notes=request.comments or "Reviewed and approved by physician.",
             doctor_name=request.doctor_name,
+            confirmed_diagnoses=request.confirmed_diagnoses,
+            prescribed_plan=request.prescribed_plan,
         )
 
         return {
             "success": True,
-            "message": (
-                "Clinical summary reviewed successfully."
-            ),
-            "data": reviewed_summary,
+            "message": "Clinical summary reviewed and approved successfully.",
+            "data": updated,
         }
-
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Doctor review failed: {str(exc)}"
-            ),
+            detail=f"Doctor review failed: {str(exc)}",
         ) from exc
-
-
-# ============================================================
-# DISCLAIMER
-# ============================================================
-
-@router.get("/disclaimer")
-def summary_disclaimer():
-    """
-    Return clinical summary disclaimer.
-    """
-
-    return {
-        "message": (
-            "AI-generated clinical summaries are intended "
-            "for information organization and clinical "
-            "review only."
-        ),
-        "diagnosis": False,
-        "autonomous_medical_decision": False,
-        "doctor_review_required": True,
-    }

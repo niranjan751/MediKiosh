@@ -43,8 +43,8 @@ function Navbar() {
 						<a className={activeLink === 'Privacy' ? 'is-active' : ''} href="#privacy" onClick={() => selectLink('Privacy')}>Privacy</a>
 					</div>
 					<div className="nav-actions">
-						<a className="login-link" href="#login" onClick={() => selectLink('Sign In')}>Sign In</a>
-						<a className="nav-cta" href="#assessment" onClick={() => selectLink('Get Started')}>
+						<a className="login-link" href="/login" onClick={() => selectLink('Sign In')}>Sign In</a>
+						<a className="nav-cta" href="/signup" onClick={() => selectLink('Get Started')}>
 							Get Started
 							<ArrowRight size={17} aria-hidden="true" />
 						</a>

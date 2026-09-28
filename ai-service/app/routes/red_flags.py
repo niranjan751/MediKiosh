@@ -150,8 +150,11 @@ def detect_patient_red_flags(
         success=True,
         red_flag_detected=result["red_flag_detected"],
         overall_severity=result["overall_severity"],
+        triage_priority=result["triage_priority"],
         flags=result["flags"],
         staff_alert_required=result["staff_alert_required"],
+        immediate_hospital_triage=result.get("immediate_hospital_triage", False),
+        emergency_instructions=result.get("emergency_instructions"),
         disclaimer=result["disclaimer"],
     )
 
