@@ -1,3 +1,8 @@
+"""
+MediKiosk AI Service - Adaptive Clinical Interview API Routes
+=============================================================
+"""
+
 from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import (
@@ -6,54 +11,56 @@ from app.models.schemas import (
     InterviewStartRequest,
     InterviewStartResponse,
     InterviewStatus,
+    QuestionOption,
 )
-
 from app.services.clinical_interview import (
-    start_interview,
-    get_session,
-    get_current_question,
-    save_answer,
-    get_progress,
     get_collected_data,
+    get_current_question,
+    get_progress,
+    get_session,
+    save_answer,
+    start_interview,
 )
 
 
 router = APIRouter(
     prefix="/interview",
-    tags=["Clinical Interview"]
+    tags=["Clinical Interview"],
 )
 
-
-# ============================================================
-# START INTERVIEW
-# ============================================================
 
 @router.post(
     "/start",
-    response_model=InterviewStartResponse
+    response_model=InterviewStartResponse,
 )
 def start_clinical_interview(
-    request: InterviewStartRequest
+    request: InterviewStartRequest,
 ):
     """
-    Start a new clinical interview session.
+    Start an adaptive clinical interview session.
+    Requires patient consent.
     """
-
     if not request.consent_given:
         raise HTTPException(
             status_code=400,
-            detail="Patient consent is required before starting the interview."
+            detail="Patient consent is mandatory before starting the medical assessment.",
         )
 
     session = start_interview(
         patient_id=request.patient_id,
         patient_name=request.patient_name,
         language=request.language,
+        clinical_mode=request.clinical_mode,
+        chief_complaint_initial=request.chief_complaint_initial,
     )
 
-    question = get_current_question(
-        session.session_id
-    )
+    question_data = get_current_question(session.session_id)
+
+    raw_options = question_data.get("options", []) if question_data else []
+    formatted_options = [
+        opt if isinstance(opt, QuestionOption) else QuestionOption(**opt)
+        for opt in raw_options
+    ]
 
     return InterviewStartResponse(
         success=True,
@@ -63,49 +70,26 @@ def start_clinical_interview(
         status=session.status,
         question_number=session.current_question + 1,
         total_questions=session.total_questions,
-        question=(
-            question["question"]
-            if question
-            else None
-        ),
-        question_key=(
-            question["key"]
-            if question
-            else None
-        ),
-        completed=(
-            session.status == InterviewStatus.COMPLETED
-        ),
+        question=question_data["question"] if question_data else None,
+        question_key=question_data["key"] if question_data else None,
+        category=question_data.get("category") if question_data else None,
+        input_type=question_data.get("input_type", "choice") if question_data else "text",
+        options=formatted_options,
+        completed=(session.status == InterviewStatus.COMPLETED),
     )
 
-
-# ============================================================
-# GET CURRENT QUESTION
-# ============================================================
 
 @router.get(
-    "/{session_id}/question"
+    "/{session_id}/question",
 )
-def get_interview_question(
-    session_id: str
-):
-    """
-    Get the current question for an interview session.
-    """
-
+def get_interview_question(session_id: str):
+    """Fetch the active question for an interview session."""
     session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
 
-    if session is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Interview session not found."
-        )
-
-    question = get_current_question(
-        session_id
-    )
-
-    if question is None:
+    question_data = get_current_question(session_id)
+    if not question_data:
         return {
             "success": True,
             "session_id": session_id,
@@ -118,49 +102,32 @@ def get_interview_question(
         "session_id": session_id,
         "question_number": session.current_question + 1,
         "total_questions": session.total_questions,
-        "question": question["question"],
-        "question_key": question["key"],
-        "category": question["category"],
-        "required": question["required"],
+        "question": question_data["question"],
+        "question_key": question_data["key"],
+        "category": question_data.get("category"),
+        "input_type": question_data.get("input_type", "choice"),
+        "options": question_data.get("options", []),
+        "socrates_dimension": question_data.get("socrates_dimension"),
         "completed": False,
     }
 
 
-# ============================================================
-# SUBMIT ANSWER
-# ============================================================
-
 @router.post(
     "/answer",
-    response_model=InterviewAnswerResponse
+    response_model=InterviewAnswerResponse,
 )
 def submit_interview_answer(
-    request: InterviewAnswerRequest
+    request: InterviewAnswerRequest,
 ):
-    """
-    Save the patient's answer and return the next question.
-    """
-
-    session = get_session(
-        request.session_id
-    )
-
-    if session is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Interview session not found."
-        )
+    """Submits patient answer and returns next adaptive question with quick-select options."""
+    session = get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
 
     if session.status == InterviewStatus.COMPLETED:
         raise HTTPException(
             status_code=400,
-            detail="This interview has already been completed."
-        )
-
-    if session.status == InterviewStatus.CANCELLED:
-        raise HTTPException(
-            status_code=400,
-            detail="This interview has been cancelled."
+            detail="This clinical interview is already completed.",
         )
 
     updated_session = save_answer(
@@ -169,108 +136,60 @@ def submit_interview_answer(
         question_id=request.question_id,
     )
 
-    if updated_session is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Interview session not found."
-        )
+    if not updated_session:
+        raise HTTPException(status_code=500, detail="Failed to save answer.")
 
-    next_question = get_current_question(
-        request.session_id
-    )
+    next_q = get_current_question(request.session_id)
+    is_completed = (updated_session.status == InterviewStatus.COMPLETED)
 
-    completed = (
-        updated_session.status
-        == InterviewStatus.COMPLETED
-    )
+    raw_options = next_q.get("options", []) if next_q else []
+    formatted_options = [
+        opt if isinstance(opt, QuestionOption) else QuestionOption(**opt)
+        for opt in raw_options
+    ]
 
     return InterviewAnswerResponse(
         success=True,
         session_id=updated_session.session_id,
-        question_number=(
-            min(
-                updated_session.current_question + 1,
-                updated_session.total_questions
-            )
-        ),
+        question_number=min(updated_session.current_question + 1, updated_session.total_questions),
         total_questions=updated_session.total_questions,
         answer_saved=True,
-        completed=completed,
-        next_question=(
-            next_question["question"]
-            if next_question
-            else None
-        ),
-        next_question_key=(
-            next_question["key"]
-            if next_question
-            else None
-        ),
-        collected_data=get_collected_data(
-            request.session_id
-        ) or {},
+        completed=is_completed,
+        next_question=next_q["question"] if next_q else None,
+        next_question_key=next_q["key"] if next_q else None,
+        category=next_q.get("category") if next_q else None,
+        input_type=next_q.get("input_type", "choice") if next_q else "text",
+        options=formatted_options,
+        collected_data=get_collected_data(request.session_id) or {},
+        red_flags_detected=updated_session.red_flags,
+        priority_alert=(len(updated_session.red_flags) > 0),
     )
 
-
-# ============================================================
-# INTERVIEW PROGRESS
-# ============================================================
 
 @router.get(
-    "/{session_id}/progress"
+    "/{session_id}/progress",
 )
-def interview_progress(
-    session_id: str
-):
-    """
-    Get interview completion progress.
-    """
+def interview_progress(session_id: str):
+    """Retrieve current progress percentage and triage status."""
+    progress = get_progress(session_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+    return {"success": True, **progress}
 
-    progress = get_progress(
-        session_id
-    )
-
-    if progress is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Interview session not found."
-        )
-
-    return {
-        "success": True,
-        **progress,
-    }
-
-
-# ============================================================
-# GET COLLECTED ANSWERS
-# ============================================================
 
 @router.get(
-    "/{session_id}/answers"
+    "/{session_id}/answers",
 )
-def interview_answers(
-    session_id: str
-):
-    """
-    Get answers collected during the interview.
-    """
-
-    session = get_session(
-        session_id
-    )
-
-    if session is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Interview session not found."
-        )
-
+def interview_answers(session_id: str):
+    """Retrieve full transcript of collected answers and red flags."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
     return {
         "success": True,
         "session_id": session_id,
         "status": session.status,
-        "answers": get_collected_data(
-            session_id
-        ) or {},
+        "answers": get_collected_data(session_id) or {},
+        "red_flags": session.red_flags,
+        "detected_category": session.detected_complaint_category,
     }
