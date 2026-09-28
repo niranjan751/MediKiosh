@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import Navbar from './components/common/Navbar'
-import Login from './pages/auth/Login'
 import {
   ArrowRight,
   Brain,
@@ -204,8 +203,6 @@ function App() {
   const showFeatures = currentPage === 'home' || currentPage === 'features'
   const showWorkflow = currentPage === 'how-it-works' || currentPage === 'home'
 
-  if (currentPage === 'login') return <Login />
-
   const filteredSteps = workflowSteps.filter((_, idx) => {
     if (activeStage === 'patient') return idx < 3
     if (activeStage === 'clinical') return idx >= 3
@@ -359,7 +356,7 @@ function App() {
                   <span className="cta-micro-badge"><CheckCircle2 size={13} /> Doctor-Approved Summary</span>
                 </div>
               </div>
-              <a className="nav-cta workflow-nav-cta" href="/signup">
+              <a className="nav-cta workflow-nav-cta" href="#assessment">
                 Get Started <ArrowRight size={17} aria-hidden="true" />
               </a>
             </div>
